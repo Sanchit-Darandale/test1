@@ -111,4 +111,4 @@ def extract(url: str = Query(..., description="Target video page URL")):
     return extractor.save()
 
 if __name__ == "__main__":
-    uvicorn.run("extract_streaming_urls_api:app", reload=True)
+    app.run()
