@@ -1,11 +1,9 @@
 from typing import Any, Dict, List
-from fastapi import FastAPI, Query
-import requests, json
+from fastapi import FastAPI, Query, HTTPException
+from pydantic import BaseModel
+import requests, json, uvicorn
 from bs4 import BeautifulSoup
-
-# =====================================================================================
-# Extractor (single fetch, cached HTML, title added)
-# =====================================================================================
+from requests.exceptions import RequestException
 
 class StreamingURLExtractor:
     def __init__(self, video_url: str):
@@ -14,37 +12,14 @@ class StreamingURLExtractor:
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0"
         })
-        self._html = None
 
     # ------------------------------------------------------------
-    # Network (cached)
+    # Network
     # ------------------------------------------------------------
     def fetch_page(self) -> str:
-        if self._html is None:
-            r = self.session.get(self.video_url, timeout=20)
-            r.raise_for_status()
-            self._html = r.text
-        return self._html
-
-    # ------------------------------------------------------------
-    # Title
-    # ------------------------------------------------------------
-    def extract_title(self) -> str:
-        html = self.fetch_page()
-        soup = BeautifulSoup(html, "lxml")
-
-        h1 = soup.select_one("h1.title")
-        if h1:
-            return h1.get_text(strip=True)
-
-        meta = soup.select_one('meta[property="og:title"]')
-        if meta and meta.get("content"):
-            return meta["content"].strip()
-
-        if soup.title:
-            return soup.title.get_text(strip=True)
-
-        return "N/A"
+        r = self.session.get(self.video_url, timeout=20)
+        r.raise_for_status()
+        return r.text
 
     # ------------------------------------------------------------
     # Media definitions
@@ -100,30 +75,40 @@ class StreamingURLExtractor:
             if not url:
                 continue
 
+            height = d.get("quality")
+
+            fmt = d.get("format") or d.get("videoFormat") or ""
+            resolved_url = self.resolve_stream_url(url)
+
             out.append({
-                "quality": d.get("quality"),
-                "format": (d.get("format") or d.get("videoFormat") or "").lower(),
-                "url": self.resolve_stream_url(url),
+                "quality": height,
+                "format": fmt.lower(),
+                "url": resolved_url,
                 "Developer": "Silent Ghost",
             })
 
         return out
 
     # ------------------------------------------------------------
-    # Output
+    # Save output
     # ------------------------------------------------------------
     def save(self) -> Dict[str, Any]:
-        return {
-            "title": self.extract_title(),
+        data = {
             "video_url": self.video_url,
             "streaming_urls": self.extract_streaming_urls()
         }
 
+        return data
 
-app = FastAPI(title="Streaming URL Extractor API", version="1.0.1")
-
+app = FastAPI(
+    title="Streaming URL Extractor API",
+    version="1.0.1",
+)
 
 @app.get("/")
 def extract(url: str = Query(..., description="Target video page URL")):
     extractor = StreamingURLExtractor(url)
     return extractor.save()
+
+if __name__ == "__main__":
+    uvicorn.run("extract_streaming_urls_api:app", reload=True)
